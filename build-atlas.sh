@@ -23,6 +23,11 @@ PROJ_DIR="$(pwd)"
 BUILD_DIR="/tmp/atlas-full-build"
 CHROOT_DIR="${BUILD_DIR}/chroot"
 IMAGE_DIR="${BUILD_DIR}/image"
+# Up-to-date Debian keyring fetched from Debian (the host's bundled
+# debian-archive-keyring is often outdated and lacks the Bookworm signing keys,
+# which is the root cause of the "Couldn't execute /usr/bin/apt-key" failure).
+KEYRING_HOST="${BUILD_DIR}/debian-archive-keyring.gpg"
+KEYRING_CHROOT="/usr/share/keyrings/debian-archive-keyring.gpg"
 DATE=$(date +%Y%m%d)
 ISO_NAME="atlas-os-3.0-amd64-${DATE}.iso"
 ISO_PATH="${PROJ_DIR}/${ISO_NAME}"
@@ -65,10 +70,34 @@ install_host_tools() {
     export DEBIAN_FRONTEND=noninteractive
 
     apt-get update -qq
+    # 'gpg' and 'dpkg-dev' are required so mmdebstrap can handle signed-by
+    # keyrings and so we can extract the up-to-date keyring below.
     apt-get install -y -qq --no-install-recommends mmdebstrap squashfs-tools xorriso isolinux syslinux-efi \
         grub-pc-bin grub-efi-amd64-bin mtools dosfstools curl wget gpg dpkg-dev \
         debian-archive-keyring > /dev/null
     msg_ok "Host tools installed."
+}
+
+fetch_current_keyring() {
+    # The debian-archive-keyring shipped with older Ubuntu/Codespaces hosts does
+    # NOT contain the Debian 12 "Bookworm" signing keys. apt then fails to verify
+    # the repository and falls back to the deprecated (and on newer hosts,
+    # removed) apt-key binary -> "Couldn't execute /usr/bin/apt-key".
+    # We download the current keyring straight from Debian to guarantee the
+    # Bookworm keys are present.
+    msg_info "Fetching up-to-date Debian archive keyring..."
+    mkdir -p "${BUILD_DIR}/keyring-deb"
+    local pool="http://deb.debian.org/debian/pool/main/d/debian-archive-keyring/"
+    local deb
+    deb=$(curl -fsSL "${pool}" | grep -oE 'debian-archive-keyring_[0-9.~a-z+]+_all\.deb' | sort -V | tail -n1)
+    if [[ -z "${deb}" ]]; then
+        msg_err "Could not determine latest debian-archive-keyring package."
+        exit 1
+    fi
+    curl -fsSL -o "${BUILD_DIR}/keyring-deb/${deb}" "${pool}${deb}"
+    dpkg-deb -x "${BUILD_DIR}/keyring-deb/${deb}" "${BUILD_DIR}/keyring-deb/extracted"
+    cp "${BUILD_DIR}/keyring-deb/extracted/usr/share/keyrings/debian-archive-keyring.gpg" "${KEYRING_HOST}"
+    msg_ok "Keyring ready: ${deb}"
 }
 
 clean_build() {
@@ -88,26 +117,33 @@ build_base() {
     msg_info "Bootstrapping base system with mmdebstrap (Debian Bookworm)..."
     mkdir -p "${CHROOT_DIR}"
 
-    mmdebstrap --variant=apt --components="main contrib non-free non-free-firmware" \
-        --keyring=/usr/share/keyrings/debian-archive-keyring.gpg \
+    # Pass a FULL deb line with signed-by pointing at the up-to-date keyring.
+    # mmdebstrap uses this line verbatim for the chroot's sources.list, so it
+    # MUST contain the suite and components. This makes mmdebstrap's own initial
+    # apt-get update verify with gpgv against the correct keyring and never
+    # touch apt-key.
+    mmdebstrap --variant=apt \
+        --keyring="${KEYRING_HOST}" \
         --include="${BASE_PKGS}" \
-        bookworm "${CHROOT_DIR}" "http://deb.debian.org/debian"
+        bookworm "${CHROOT_DIR}" \
+        "deb [signed-by=${KEYRING_HOST}] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware"
     msg_ok "Base system created."
 
-    # --- Set up keyring and sources.list BEFORE mounting and running apt ---
+    # --- Install the up-to-date keyring INTO the chroot and point sources at it ---
+    # The bootstrap sources.list references the host keyring path, which won't
+    # exist once the chroot is squashed. Rewrite it to an in-chroot path.
     msg_info "Setting up GPG keyring and apt sources (signed-by format)..."
     mkdir -p "${CHROOT_DIR}/usr/share/keyrings/"
-    cp /usr/share/keyrings/debian-archive-keyring.gpg "${CHROOT_DIR}/usr/share/keyrings/"
+    cp "${KEYRING_HOST}" "${CHROOT_DIR}${KEYRING_CHROOT}"
 
-    # Overwrite mmdebstrap-generated sources.list with signed-by format
-    cat << 'EOF' > "${CHROOT_DIR}/etc/apt/sources.list"
-deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
-deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+    cat << EOF > "${CHROOT_DIR}/etc/apt/sources.list"
+deb [signed-by=${KEYRING_CHROOT}] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+deb [signed-by=${KEYRING_CHROOT}] http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+deb [signed-by=${KEYRING_CHROOT}] http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 EOF
 
     # Remove any stale sources from mmdebstrap and cached apt lists
-    rm -f "${CHROOT_DIR}/etc/apt/sources.list.d/"*
+    rm -f "${CHROOT_DIR}/etc/apt/sources.list.d/"* 2>/dev/null || true
     rm -rf "${CHROOT_DIR}/var/lib/apt/lists/"*
     msg_ok "Keyring and sources configured."
 
@@ -121,7 +157,7 @@ EOF
     chroot_exec "echo '127.0.0.1 localhost atlas-nexus' > /etc/hosts"
     chroot_exec "export DEBIAN_FRONTEND=noninteractive && dpkg-reconfigure -f noninteractive tzdata"
 
-    # Now apt-get update will use the signed-by format and never call apt-key
+    # Now apt-get update uses signed-by + the correct keyring; apt-key is never called
     chroot_exec "apt-get update"
     msg_ok "Base system configured and apt updated successfully."
 }
@@ -329,6 +365,7 @@ case $choice in
         preflight
         install_host_tools
         clean_build
+        fetch_current_keyring
         build_base
         setup_user_and_desktops
         install_packages "full"
@@ -340,6 +377,7 @@ case $choice in
         preflight
         install_host_tools
         clean_build
+        fetch_current_keyring
         build_base
         setup_user_and_desktops
         install_packages "light"
