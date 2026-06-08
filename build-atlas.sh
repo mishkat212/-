@@ -129,22 +129,43 @@ build_base() {
         "deb [signed-by=${KEYRING_HOST}] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware"
     msg_ok "Base system created."
 
-    # --- Install the up-to-date keyring INTO the chroot and point sources at it ---
-    # The bootstrap sources.list references the host keyring path, which won't
-    # exist once the chroot is squashed. Rewrite it to an in-chroot path.
-    msg_info "Setting up GPG keyring and apt sources (signed-by format)..."
+    # --- Install the up-to-date keyring INTO the chroot ---
+    # Belt-and-suspenders: place the keyring in TWO locations so apt NEVER needs
+    # apt-key regardless of how sources.list is written:
+    #   1) /usr/share/keyrings/  — referenced by the signed-by option in sources
+    #   2) /etc/apt/trusted.gpg.d/ — apt reads .gpg files here directly via gpgv
+    #      for ANY source, even those without signed-by (fallback that does NOT
+    #      invoke apt-key)
+    msg_info "Setting up GPG keyring and apt sources (signed-by + trusted.gpg.d)..."
     mkdir -p "${CHROOT_DIR}/usr/share/keyrings/"
+    mkdir -p "${CHROOT_DIR}/etc/apt/trusted.gpg.d/"
     cp "${KEYRING_HOST}" "${CHROOT_DIR}${KEYRING_CHROOT}"
+    cp "${KEYRING_HOST}" "${CHROOT_DIR}/etc/apt/trusted.gpg.d/debian-archive-keyring.gpg"
 
+    # Overwrite sources.list with the signed-by format pointing at the in-chroot
+    # keyring path (the bootstrap sources.list references the HOST path which
+    # won't exist once the chroot is squashed).
     cat << EOF > "${CHROOT_DIR}/etc/apt/sources.list"
 deb [signed-by=${KEYRING_CHROOT}] http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
 deb [signed-by=${KEYRING_CHROOT}] http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
 deb [signed-by=${KEYRING_CHROOT}] http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 EOF
 
-    # Remove any stale sources from mmdebstrap and cached apt lists
-    rm -f "${CHROOT_DIR}/etc/apt/sources.list.d/"* 2>/dev/null || true
+    # Remove ALL mmdebstrap-generated sources (one-line or deb822 format) and
+    # stale apt list caches so the ONLY sources apt sees are our signed-by lines.
+    rm -rf "${CHROOT_DIR}/etc/apt/sources.list.d" 2>/dev/null || true
+    mkdir -p "${CHROOT_DIR}/etc/apt/sources.list.d"
     rm -rf "${CHROOT_DIR}/var/lib/apt/lists/"*
+
+    # Diagnostic: show what apt will actually read (helps debug if still failing)
+    msg_info "Active sources.list:"
+    cat "${CHROOT_DIR}/etc/apt/sources.list"
+    msg_info "Keyring at ${KEYRING_CHROOT}:"
+    ls -la "${CHROOT_DIR}${KEYRING_CHROOT}"
+    msg_info "trusted.gpg.d contents:"
+    ls -la "${CHROOT_DIR}/etc/apt/trusted.gpg.d/"
+    msg_info "sources.list.d contents:"
+    ls -la "${CHROOT_DIR}/etc/apt/sources.list.d/"
     msg_ok "Keyring and sources configured."
 
     msg_info "Configuring chroot mounts..."
@@ -157,7 +178,7 @@ EOF
     chroot_exec "echo '127.0.0.1 localhost atlas-nexus' > /etc/hosts"
     chroot_exec "export DEBIAN_FRONTEND=noninteractive && dpkg-reconfigure -f noninteractive tzdata"
 
-    # Now apt-get update uses signed-by + the correct keyring; apt-key is never called
+    # Now apt-get update uses signed-by + trusted.gpg.d; apt-key is never called
     chroot_exec "apt-get update"
     msg_ok "Base system configured and apt updated successfully."
 }
