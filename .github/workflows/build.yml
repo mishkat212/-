@@ -12,20 +12,21 @@ jobs:
       options: --privileged 
 
     steps:
-      - name: جلب ملفات السكريبت من المستودع
+      - name: 1. تهيئة السيرفر وتثبيت الأدوات الأساسية ومفاتيح الأمان
+        run: |
+          pacman -Sy --noconfirm archlinux-keyring
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git tar gzip bash squashfs-tools xorriso archiso dosfstools libisoburn
+
+      - name: 2. جلب ملفات السكريبت من المستودع
         uses: actions/checkout@v4
 
-      - name: تحديث النظام وتثبيت أدوات بناء الـ ISO
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm git bash squashfs-tools xorriso archiso
-
-      - name: تشغيل سكريبت بناء أطلس لينكس
+      - name: 3. تشغيل سكريبت بناء أطلس لينكس
         run: |
           chmod +x atlas-linux-build.sh
           bash atlas-linux-build.sh --mode iso
 
-      - name: رفع ملف الـ ISO النهائي لجيت هاب
+      - name: 4. رفع ملف الـ ISO النهائي لجيت هاب
         uses: actions/upload-artifact@v4
         with:
           name: Atlas-Linux-Phoenix-ISO
