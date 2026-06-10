@@ -13,15 +13,10 @@ jobs:
 
       - name: 2. فحص وتطهير ملفات السكريبت
         run: |
-          echo "=== جاري البحث عن سكريبت بناء النظام ==="
-          if [ -f atlas-linux-build.sh ]; then
-            sed -i 's/\r$//' atlas-linux-build.sh
-            chmod +x atlas-linux-build.sh
-            echo "✅ تم العثور على الملف بنجاح وتطهيره من رموز ويندوز."
-          else
-            echo "❌ خطأ فادح: ملف atlas-linux-build.sh غير موجود في المستودع كلياً!"
-            exit 1
-          fi
+          echo "=== جاري فحص ملف السكريبت ==="
+          sed -i 's/\r$//' atlas-linux-build.sh
+          chmod +x atlas-linux-build.sh
+          echo "✅ تم التطهير والتحضير بنجاح."
 
       - name: 3. بناء الأيزو داخل بيئة Arch Linux المستقرة
         run: |
@@ -31,15 +26,18 @@ jobs:
             quay.io/archlinux/archlinux:latest \
             bash -c "
               set -e
-              echo '=== 1. تحديث قاعدة بيانات الحزم ومفاتيح الأمان ==='
+              
+              echo '=== 1. تهيئة وتحديث مفاتيح أمان الأرش لينكس ==='
+              pacman-key --init
+              pacman-key --populate archlinux
               pacman -Sy --noconfirm archlinux-keyring
               
-              echo '=== 2. تثبيت أدوات بناء الأيزو الرسمية (Archiso) ==='
+              echo '=== 2. تحديث النظام وتثبيت أدوات البناء مع Sudo ==='
               pacman -Syu --noconfirm
-              pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn
+              pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn sudo
               
-              echo '=== 3. بدء تشغيل سكريبت بناء أطلس لينكس الفعلي ==='
-              ./atlas-linux-build.sh --mode iso
+              echo '=== 3. بدء تشغيل السكريبت بوضع كاشف الأخطاء الخطوة بخطوة ==='
+              bash -x ./atlas-linux-build.sh --mode iso
             "
 
       - name: 4. رفع ملف الـ ISO النهائي إلى جيت هاب
