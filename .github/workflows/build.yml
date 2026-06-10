@@ -5,24 +5,23 @@ on:
 
 jobs:
   build-iso:
-    runs-on: ubuntu-latest # استخدام سيرفر أوبونتو المستقر
+    runs-on: ubuntu-latest # سيرفر أوبونتو المستقر كقاعدة رئيسية
 
     steps:
       - name: 1. جلب ملفات المشروع من المستودع
         uses: actions/checkout@v4
 
-      - name: 2. بناء الأيزو داخل بيئة Arch Linux مستقلة (عبر مستودعات Quay المستقرة)
+      - name: 2. تطهير السكريبت وبناء الأيزو داخل بيئة Arch Linux
         run: |
+          # أولاً: تنظيف ملف السكريبت من أي علامات سطر زائدة (Windows CRLF) لمنع الخطأ 127
+          sed -i 's/\r$//' atlas-linux-build.sh
+          
+          # ثانياً: تشغيل البيئة، وتثبيت أدوات بناء الأيزو كاملة، ثم بدء البناء في سطر واحد مستقر
           docker run --privileged --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             quay.io/archlinux/archlinux:latest \
-            bash -c "
-              echo '=== 1. تحديث مفاتيح أمان الأرش لينكس ===' && \
-              pacman -Sy --noconfirm archlinux-keyring && \
-              echo '=== 2. تشغيل سكريبت بناء أطلس لينكس ===' && \
-              bash atlas-linux-build.sh --mode iso
-            "
+            bash -c "pacman -Sy --noconfirm archlinux-keyring && pacman -Syu --noconfirm && pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn && bash atlas-linux-build.sh --mode iso"
 
       - name: 3. رفع ملف الـ ISO النهائي إلى جيت هاب
         uses: actions/upload-artifact@v4
