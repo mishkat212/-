@@ -11,15 +11,31 @@ jobs:
       - name: 1. جلب ملفات المشروع من المستودع
         uses: actions/checkout@v4
 
-      - name: 2. فحص وتطهير ملفات السكريبت وحقن إصلاحات الإقلاع
+      - name: 2. فحص وتطهير ملفات السكريبت وحقن إصلاحات التوافقية
         run: |
           echo "=== جاري فحص وتعديل ملف السكريبت ==="
           sed -i 's/\r$//' atlas-linux-build.sh
           chmod +x atlas-linux-build.sh
           
-          # إصلاح تلقائي: حقن حزم الإقلاع الأساسية في ملف حزم الأيزو مباشرة قبل تشغيل mkarchiso
-          sed -i '/mkarchiso -v/i echo "syslinux" >> /tmp/atlas-build/packages.x86_64; echo "grub" >> /tmp/atlas-build/packages.x86_64' atlas-linux-build.sh
-          echo "✅ تم التطهير وحقن الحزم المفقودة برمجياً بنجاح."
+          # إنشاء ملف الإصلاح الذكي ليتم تشغيله داخل الحاوية قبل mkarchiso مباشرة
+          cat << 'EOF' > patch.sh
+          echo "=== تشغيل رقعة التوافقية الذكية للمود المودرن ==="
+          if [ -f /tmp/atlas-build/profile.def ]; then
+            sed -i "s/^[[:space:]]*boot_modes=.*/boot_modes=('bios.syslinux' 'uefi.grub')/g" /tmp/atlas-build/profile.def
+            echo "✅ تم صيانة وتحديث أنظمة الإقلاع في profile.def لتناسب بيئة العمل الحديثة."
+          fi
+          if [ -f /tmp/atlas-build/packages.x86_64 ]; then
+            echo "syslinux" >> /tmp/atlas-build/packages.x86_64
+            echo "grub" >> /tmp/atlas-build/packages.x86_64
+            echo "efibootmgr" >> /tmp/atlas-build/packages.x86_64
+            echo "mtools" >> /tmp/atlas-build/packages.x86_64
+            echo "✅ تم إدراج حزم الإقلاع الحيوية في قائمة التوزيعة."
+          fi
+          EOF
+          
+          # حقن تشغيل الـ patch.sh داخل السكريبت الرئيسي قبل سطر mkarchiso
+          sed -i '/mkarchiso -v/i bash /workspace/patch.sh' atlas-linux-build.sh
+          echo "✅ تم تجهيز وحقن رقعة الإصلاح الشاملة بنجاح."
 
       - name: 3. بناء الأيزو داخل بيئة Arch Linux المستقرة
         run: |
@@ -37,7 +53,7 @@ jobs:
               
               echo '=== 2. تحديث النظام وتثبيت أدوات البناء الكاملة مع حزم الإقلاع ==='
               pacman -Syu --noconfirm
-              pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn sudo reflector grub syslinux
+              pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn sudo reflector grub syslinux mtools
               
               echo '=== 3. تجهيز ملف المرايا (Mirrorlist) لسرعة التحميل ==='
               reflector --latest 5 --protocol https --sort rate --save /etc/pacman.d/mirrorlist
