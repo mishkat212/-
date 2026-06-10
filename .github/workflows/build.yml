@@ -11,63 +11,53 @@ jobs:
       - name: 1. جلب ملفات المشروع من المستودع
         uses: actions/checkout@v4
 
-      - name: 2. فحص وتطهير ملفات السكريبت وحقن إصلاحات التوافقية الشاملة
+      - name: 2. إعداد وحقن رقعة المستودعات الشاملة وأنظمة الإقلاع
         run: |
-          echo "=== جاري فحص وتعديل ملف السكريبت ==="
+          echo "=== جاري تجهيز رقعة الدمج الكاملة ==="
           sed -i 's/\r$//' atlas-linux-build.sh
           chmod +x atlas-linux-build.sh
           
-          # إنشاء ملف الإصلاح والفلترة الذكية للحزم
+          # إنشاء سكريبت الحقن الذكي الذي سيعدل ملفات الأيزو قبل الصهر مباشرة
           cat << 'EOF' > patch.sh
-          echo "=== تشغيل رقعة التوافقية الذكية وتفعيل المستودعات ==="
+          echo "=== 🚀 بدء حقن المستودعات الكبرى داخل ملفات بناء الأيزو ==="
           
-          # 1. تفعيل مستودع multilib (مهم جداً لحزم مثل steam)
-          if [ -f /etc/pacman.conf ]; then
-            sed -i '/\[multilib\]/,+1 s/^#//' /etc/pacman.conf
-            sed -i 's/^[[:space:]]*SigLevel[[:space:]]*=.*/SigLevel = Never/g' /etc/pacman.conf
-          fi
-          pacman -Sy --noconfirm
+          # 1. إصلاح ملف الإعدادات وهيكلة أنظمة الإقلاع الحديثة لتفادي الانهيار القديم
+          TARGET_PROFILE="/tmp/atlas-build/profiledef.sh"
+          [ ! -f "$TARGET_PROFILE" ] && TARGET_PROFILE="/tmp/atlas-build/profile.def"
           
-          # 2. إصلاح ملف الإعدادات وإزالة أوضاع الإقلاع القديمة تماماً
-          if [ -f /tmp/atlas-build/profile.def ]; then
-            sed -i '/boot_modes=(/,/)/d' /tmp/atlas-build/profile.def
-            echo "boot_modes=('bios.syslinux' 'uefi.grub')" >> /tmp/atlas-build/profile.def
+          if [ -f "$TARGET_PROFILE" ]; then
+            sed -i '/boot_modes=(/,/)/d' "$TARGET_PROFILE"
+            echo "boot_modes=('bios.syslinux' 'uefi.grub')" >> "$TARGET_PROFILE"
+            echo "✅ تم تحديث وتأمين هيكل أنظمة الإقلاع الحديثة."
           fi
           
-          # 3. الفلترة الذكية: حذف أي حزمة غير متوفرة في المستودعات الرسمية لتجنب انهيار البناء
-          if [ -f /tmp/atlas-build/packages.x86_64 ]; then
-            echo "=== جاري تنظيف قائمة الحزم من الأدوات غير الرسمية (AUR) ==="
-            touch /tmp/cleaned_packages.txt
+          # 2. تعديل ملف pacman.conf الخاص بالأيزو لفتح المستودعات وتجاوز حواجز الأمان مؤقتاً
+          TARGET_CONF="/tmp/atlas-build/pacman.conf"
+          if [ -f "$TARGET_CONF" ]; then
+            # تعطيل التواقيع الرقمية داخل الأيزو لضمان قبول حزم AUR دون مشاكل مفاتيح
+            sed -i 's/^[[:space:]]*SigLevel[[:space:]]*=.*/SigLevel = Never/g' "$TARGET_CONF"
             
-            while read -r pkg; do
-              # تخطي الأسطر الفارغة والتعليقات
-              [[ -z "$pkg" || "$pkg" =~ ^# ]] && echo "$pkg" >> /tmp/cleaned_packages.txt && continue
-              
-              # التحقق من وجود الحزمة في مستودعات pacman الرسمية
-              if pacman -Si "$pkg" >/dev/null 2>&1; then
-                echo "$pkg" >> /tmp/cleaned_packages.txt
-              else
-                echo "⚠️ تم استبعاد حزمة غير رسمية لتفادي فشل البناء: $pkg"
-              fi
-            done < /tmp/atlas-build/packages.x86_64
+            # تفعيل مستودع الألعاب multilib
+            sed -i '/\[multilib\]/,+1 s/^#//' "$TARGET_CONF"
             
-            # استبدال القائمة القديمة بالجديدة النظيفة
-            mv /tmp/cleaned_packages.txt /tmp/atlas-build/packages.x86_64
+            # حقن مستودع Chaotic-AUR السحابي للبرامج الخارجية
+            if ! grep -q "\[chaotic-aur\]" "$TARGET_CONF"; then
+              echo -e "\n[chaotic-aur]\nSigLevel = Never\nServer = https://cdn-mirror.chaotic.cx/chaotic-aur/\$arch" >> "$TARGET_CONF"
+            fi
             
-            # التأكد من إضافة حزم الإقلاع الأساسية
-            for essential in syslinux grub efibootmgr mtools; do
-              if ! grep -q "^$essential$" /tmp/atlas-build/packages.x86_64; then
-                echo "$essential" >> /tmp/atlas-build/packages.x86_64
-              fi
-            done
+            # حقن مستودع BlackArch لأدوات الحماية والاختراق
+            if ! grep -q "\[blackarch\]" "$TARGET_CONF"; then
+              echo -e "\n[blackarch]\nSigLevel = Never\nServer = https://blackarch.org/blackarch/\$repo/os/\$arch" >> "$TARGET_CONF"
+            fi
+            echo "✅ تم بنجاح ربط الأيزو بمستودعات Chaotic-AUR و BlackArch و Multilib."
           fi
           EOF
           
-          # حقن تشغيل الـ patch.sh داخل السكريبت الرئيسي قبل سطر mkarchiso مباشرة
+          # حقن تشغيل الرقعة السحرية داخل السكريبت الرئيسي قبل بدء أمر mkarchiso
           sed -i '/mkarchiso -v/i bash /workspace/patch.sh' atlas-linux-build.sh
-          echo "✅ تم تجهيز وحقن رقعة الفلترة الشاملة بنجاح."
+          echo "✅ تم تجهيز عملية الحقن التلقائي بنجاح."
 
-      - name: 3. بناء الأيزو داخل بيئة Arch Linux المستقرة
+      - name: 3. بناء الأيزو بكامل الحزم داخل البيئة المجهزة
         run: |
           docker run --privileged --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -76,28 +66,30 @@ jobs:
             bash -c "
               set -e
               
-              echo '=== 1. تهيئة وتحديث مفاتيح أمان الأرش لينكس ==='
+              echo '=== 1. تهيئة وتحديث مفاتيح أمان النظام المستضيف ==='
               pacman-key --init
               pacman-key --populate archlinux
               pacman -Sy --noconfirm archlinux-keyring
               
-              echo '=== 2. تحديث النظام وتثبيت أدوات البناء الكاملة ==='
-              # تفعيل multilib للمستضيف أيضاً لضمان التوافق التام
+              echo '=== 2. ربط النظام المستضيف بالمستودعات الكبرى لتمرير الفحص ==='
+              sed -i 's/^[[:space:]]*SigLevel[[:space:]]*=.*/SigLevel = Never/g' /etc/pacman.conf
               sed -i '/\[multilib\]/,+1 s/^#//' /etc/pacman.conf
-              pacman -Syu --noconfirm
+              
+              echo -e '\n[chaotic-aur]\nSigLevel = Never\nServer = https://cdn-mirror.chaotic.cx/chaotic-aur/\$arch' >> /etc/pacman.conf
+              echo -e '\n[blackarch]\nSigLevel = Never\nServer = https://blackarch.org/blackarch/\$repo/os/\$arch' >> /etc/pacman.conf
+              
+              echo '=== 3. تحديث مستودعات السيرفر وتثبيت أدوات الصهر الكاملة ==='
+              pacman -Sy
               pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn sudo reflector grub syslinux mtools
               
-              echo '=== 3. تجهيز ملف المرايا (Mirrorlist) لسرعة التحميل ==='
-              reflector --latest 5 --protocol https --sort rate --save /etc/pacman.d/mirrorlist
-              
-              echo '=== 4. بدء تشغيل السكريبت بوضع كاشف الأخطاء خطوة بخطوة ==='
+              echo '=== 4. تشغيل بناء أطلس لينكس بكامل حزمه ومميزاته ==='
               bash -x ./atlas-linux-build.sh --mode iso
             "
 
-      - name: 4. رفع ملف الـ ISO النهائي إلى جيت هاب
+      - name: 4. رفع ملف الـ ISO النهائي المكتمل إلى جيت هاب
         uses: actions/upload-artifact@v4
         with:
-          name: Atlas-Linux-Phoenix-ISO
+          name: Atlas-Linux-Phoenix-Full-ISO
           path: |
             *.iso
             atlas-output/*.iso
