@@ -1,0 +1,35 @@
+name: Build Atlas Linux ISO
+
+on:
+  workflow_dispatch: # لتشغيل البناء يدوياً في أي وقت
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    
+    container:
+      image: archlinux:latest
+      options: --privileged 
+
+    steps:
+      - name: جلب ملفات السكريبت من المستودع
+        uses: actions/checkout@v4
+
+      - name: تحديث النظام وتثبيت أدوات بناء الـ ISO
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm git bash squashfs-tools xorriso archiso
+
+      - name: تشغيل سكريبت بناء أطلس لينكس
+        run: |
+          chmod +x atlas-linux-build.sh
+          bash atlas-linux-build.sh --mode iso
+
+      - name: رفع ملف الـ ISO النهائي لجيت هاب
+        uses: actions/upload-artifact@v4
+        with:
+          name: Atlas-Linux-Phoenix-ISO
+          path: |
+            *.iso
+            atlas-output/*.iso
+          retention-days: 7
