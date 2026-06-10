@@ -5,28 +5,26 @@ on:
 
 jobs:
   build-iso:
-    runs-on: ubuntu-latest
-    
-    container:
-      image: archlinux:latest
-      options: --privileged 
+    runs-on: ubuntu-latest # استخدام سيرفر أوبونتو المستقر
 
     steps:
-      - name: 1. تهيئة السيرفر وتثبيت الأدوات الأساسية ومفاتيح الأمان
-        run: |
-          pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm git tar gzip bash squashfs-tools xorriso archiso dosfstools libisoburn
-
-      - name: 2. جلب ملفات السكريبت من المستودع
+      - name: 1. جلب ملفات المشروع من المستودع
         uses: actions/checkout@v4
 
-      - name: 3. تشغيل سكريبت بناء أطلس لينكس
+      - name: 2. بناء الأيزو داخل بيئة Arch Linux مستقلة (عبر مستودعات Quay المستقرة)
         run: |
-          chmod +x atlas-linux-build.sh
-          bash atlas-linux-build.sh --mode iso
+          docker run --privileged --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            quay.io/archlinux/archlinux:latest \
+            bash -c "
+              echo '=== 1. تحديث مفاتيح أمان الأرش لينكس ===' && \
+              pacman -Sy --noconfirm archlinux-keyring && \
+              echo '=== 2. تشغيل سكريبت بناء أطلس لينكس ===' && \
+              bash atlas-linux-build.sh --mode iso
+            "
 
-      - name: 4. رفع ملف الـ ISO النهائي لجيت هاب
+      - name: 3. رفع ملف الـ ISO النهائي إلى جيت هاب
         uses: actions/upload-artifact@v4
         with:
           name: Atlas-Linux-Phoenix-ISO
