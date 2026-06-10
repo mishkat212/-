@@ -11,12 +11,15 @@ jobs:
       - name: 1. جلب ملفات المشروع من المستودع
         uses: actions/checkout@v4
 
-      - name: 2. فحص وتطهير ملفات السكريبت
+      - name: 2. فحص وتطهير ملفات السكريبت وحقن إصلاحات الإقلاع
         run: |
-          echo "=== جاري فحص ملف السكريبت ==="
+          echo "=== جاري فحص وتعديل ملف السكريبت ==="
           sed -i 's/\r$//' atlas-linux-build.sh
           chmod +x atlas-linux-build.sh
-          echo "✅ تم التطهير والتحضير بنجاح."
+          
+          # إصلاح تلقائي: حقن حزم الإقلاع الأساسية في ملف حزم الأيزو مباشرة قبل تشغيل mkarchiso
+          sed -i '/mkarchiso -v/i echo "syslinux" >> /tmp/atlas-build/packages.x86_64; echo "grub" >> /tmp/atlas-build/packages.x86_64' atlas-linux-build.sh
+          echo "✅ تم التطهير وحقن الحزم المفقودة برمجياً بنجاح."
 
       - name: 3. بناء الأيزو داخل بيئة Arch Linux المستقرة
         run: |
@@ -32,11 +35,14 @@ jobs:
               pacman-key --populate archlinux
               pacman -Sy --noconfirm archlinux-keyring
               
-              echo '=== 2. تحديث النظام وتثبيت أدوات البناء مع Sudo ==='
+              echo '=== 2. تحديث النظام وتثبيت أدوات البناء الكاملة مع حزم الإقلاع ==='
               pacman -Syu --noconfirm
-              pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn sudo
+              pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn sudo reflector grub syslinux
               
-              echo '=== 3. بدء تشغيل السكريبت بوضع كاشف الأخطاء الخطوة بخطوة ==='
+              echo '=== 3. تجهيز ملف المرايا (Mirrorlist) لسرعة التحميل ==='
+              reflector --latest 5 --protocol https --sort rate --save /etc/pacman.d/mirrorlist
+              
+              echo '=== 4. بدء تشغيل السكريبت بوضع كاشف الأخطاء الخطوة بخطوة ==='
               bash -x ./atlas-linux-build.sh --mode iso
             "
 
