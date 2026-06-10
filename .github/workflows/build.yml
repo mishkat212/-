@@ -19,17 +19,8 @@ jobs:
             chmod +x atlas-linux-build.sh
             echo "✅ تم العثور على الملف بنجاح وتطهيره من رموز ويندوز."
           else
-            echo "⚠️ تحذير: لم يتم العثور على الملف في المجلد الرئيسي، جاري البحث في المجلدات الفرعية..."
-            SCRIPT_PATH=$(find . -name "atlas-linux-build.sh" -print -quit)
-            if [ -n "$SCRIPT_PATH" ]; then
-              cp "$SCRIPT_PATH" ./atlas-linux-build.sh
-              sed -i 's/\r$//' atlas-linux-build.sh
-              chmod +x atlas-linux-build.sh
-              echo "✅ تم العثور على الملف في المسار ($SCRIPT_PATH) ونقله للمجلد الرئيسي بنجاح."
-            else
-              echo "❌ خطأ فادح: ملف atlas-linux-build.sh غير موجود في المستودع كلياً!"
-              exit 1
-            fi
+            echo "❌ خطأ فادح: ملف atlas-linux-build.sh غير موجود في المستودع كلياً!"
+            exit 1
           fi
 
       - name: 3. بناء الأيزو داخل بيئة Arch Linux المستقرة
