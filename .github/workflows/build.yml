@@ -1,7 +1,7 @@
 name: Build Atlas Linux ISO
 
 on:
-  workflow_dispatch: # لتشغيل البناء يدوياً في أي وقت
+  workflow_dispatch: # تشغيل يدوي في أي وقت
 
 jobs:
   build-iso:
@@ -11,17 +11,17 @@ jobs:
       - name: 1. جلب ملفات المشروع من المستودع
         uses: actions/checkout@v4
 
-      - name: 2. إعداد وحقن رقعة المستودعات الشاملة وأنظمة الإقلاع
+      - name: 2. إعداد وحقن رقعة المستودعات وأنظمة الإقلاع الحديثة
         run: |
           echo "=== جاري تجهيز رقعة الدمج الكاملة ==="
           sed -i 's/\r$//' atlas-linux-build.sh
           chmod +x atlas-linux-build.sh
           
-          # إنشاء سكريبت الحقن الذكي الذي سيعدل ملفات الأيزو قبل الصهر مباشرة
+          # إنشاء سكريبت الحقن الذكي لتعديل ملفات الأيزو الداخلية قبل الصهر
           cat << 'EOF' > patch.sh
           echo "=== 🚀 بدء حقن المستودعات الكبرى داخل ملفات بناء الأيزو ==="
           
-          # 1. إصلاح ملف الإعدادات وهيكلة أنظمة الإقلاع الحديثة لتفادي الانهيار القديم
+          # أ. إصلاح ملف الإعدادات وهيكلة أنظمة الإقلاع لتفادي خطأ Validating القديم
           TARGET_PROFILE="/tmp/atlas-build/profiledef.sh"
           [ ! -f "$TARGET_PROFILE" ] && TARGET_PROFILE="/tmp/atlas-build/profile.def"
           
@@ -31,33 +31,47 @@ jobs:
             echo "✅ تم تحديث وتأمين هيكل أنظمة الإقلاع الحديثة."
           fi
           
-          # 2. تعديل ملف pacman.conf الخاص بالأيزو لفتح المستودعات وتجاوز حواجز الأمان مؤقتاً
+          # ب. تعديل أسماء حزم KDE و GStreamer القديمة لتتوافق مع مستودعات أرش الحالية
+          TARGET_PKGS="/tmp/atlas-build/packages.x86_64"
+          if [ -f "$TARGET_PKGS" ]; then
+            echo "=== جاري تصحيح مسميات الحزم القديمة ==="
+            sed -i 's/kdebase-meta/plasma-meta/g' "$TARGET_PKGS"
+            sed -i 's/kdegraphics-meta//g' "$TARGET_PKGS"
+            sed -i 's/kdeadmin-meta//g' "$TARGET_PKGS"
+            sed -i 's/kdeutils-meta//g' "$TARGET_PKGS"
+            sed -i 's/gstreamer-plugin-good/gst-plugins-good/g' "$TARGET_PKGS"
+            sed -i 's/gstreamer-plugin-ugly/gst-plugins-ugly/g' "$TARGET_PKGS"
+            
+            # التأكد من وجود أدوات الإقلاع الأساسية
+            for essential in syslinux grub efibootmgr mtools; do
+              if ! grep -q "^$essential$" "$TARGET_PKGS"; then
+                echo "$essential" >> "$TARGET_PKGS"
+              fi
+            done
+          fi
+          
+          # ج. تعديل ملف pacman.conf الخاص بالأيزو وتلقيمه بالمستودعات
           TARGET_CONF="/tmp/atlas-build/pacman.conf"
           if [ -f "$TARGET_CONF" ]; then
-            # تعطيل التواقيع الرقمية داخل الأيزو لضمان قبول حزم AUR دون مشاكل مفاتيح
-            sed -i 's/^[[:space:]]*SigLevel[[:space:]]*=.*/SigLevel = Never/g' "$TARGET_CONF"
-            
-            # تفعيل مستودع الألعاب multilib
+            sed -i 's/^[[:space:]]*SigLevel[[:space:]]*=.*/SigLevel = Optional TrustAll/g' "$TARGET_CONF"
             sed -i '/\[multilib\]/,+1 s/^#//' "$TARGET_CONF"
             
-            # حقن مستودع Chaotic-AUR السحابي للبرامج الخارجية
             if ! grep -q "\[chaotic-aur\]" "$TARGET_CONF"; then
               echo -e "\n[chaotic-aur]\nSigLevel = Never\nServer = https://cdn-mirror.chaotic.cx/chaotic-aur/\$arch" >> "$TARGET_CONF"
             fi
             
-            # حقن مستودع BlackArch لأدوات الحماية والاختراق
             if ! grep -q "\[blackarch\]" "$TARGET_CONF"; then
               echo -e "\n[blackarch]\nSigLevel = Never\nServer = https://blackarch.org/blackarch/\$repo/os/\$arch" >> "$TARGET_CONF"
             fi
-            echo "✅ تم بنجاح ربط الأيزو بمستودعات Chaotic-AUR و BlackArch و Multilib."
+            echo "✅ تم بنجاح ربط الأيزو بالمستودعات الكبرى السحابية."
           fi
           EOF
           
-          # حقن تشغيل الرقعة السحرية داخل السكريبت الرئيسي قبل بدء أمر mkarchiso
+          # حقن تشغيل الرقعة داخل السكريبت الرئيسي قبل بدء أمر mkarchiso مباشرة
           sed -i '/mkarchiso -v/i bash /workspace/patch.sh' atlas-linux-build.sh
-          echo "✅ تم تجهيز عملية الحقن التلقائي بنجاح."
+          echo "✅ تم تجهيز وحقن عملية التعديل التلقائي بنجاح."
 
-      - name: 3. بناء الأيزو بكامل الحزم داخل البيئة المجهزة
+      - name: 3. بناء الأيزو المكتمل داخل حاوية Arch Linux
         run: |
           docker run --privileged --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -71,25 +85,35 @@ jobs:
               pacman-key --populate archlinux
               pacman -Sy --noconfirm archlinux-keyring
               
-              echo '=== 2. ربط النظام المستضيف بالمستودعات الكبرى لتمرير الفحص ==='
-              sed -i 's/^[[:space:]]*SigLevel[[:space:]]*=.*/SigLevel = Never/g' /etc/pacman.conf
+              echo '=== 2. جلب وتثبيت مفاتيح مستودعات Chaotic-AUR و BlackArch ==='
+              # تفعيل مستودع multilib وتغيير مستويات الأمان مؤقتاً لتمرير المفاتيح الخارجية
+              sed -i 's/^[[:space:]]*SigLevel[[:space:]]*=.*/SigLevel = Optional TrustAll/g' /etc/pacman.conf
               sed -i '/\[multilib\]/,+1 s/^#//' /etc/pacman.conf
               
+              # إضافة مستودع الـ Chaotic مؤقتاً لتثبيت حزمة المفاتيح الخاصة به
               echo -e '\n[chaotic-aur]\nSigLevel = Never\nServer = https://cdn-mirror.chaotic.cx/chaotic-aur/\$arch' >> /etc/pacman.conf
-              echo -e '\n[blackarch]\nSigLevel = Never\nServer = https://blackarch.org/blackarch/\$repo/os/\$arch' >> /etc/pacman.conf
+              pacman -Sy --noconfirm
+              pacman -S --noconfirm chaotic-keyring || true
               
-              echo '=== 3. تحديث مستودعات السيرفر وتثبيت أدوات الصهر الكاملة ==='
-              pacman -Sy
+              # إضافة مفاتيح BlackArch الرسمية عبر السكريبت الخاص بهم
+              curl -O https://blackarch.org/strap.sh
+              chmod +x strap.sh
+              ./strap.sh || true
+              
+              echo '=== 3. تثبيت أدوات بناء وصهر الأيزو الرسمية ==='
               pacman -S --noconfirm git bash squashfs-tools xorriso archiso dosfstools libisoburn sudo reflector grub syslinux mtools
               
-              echo '=== 4. تشغيل بناء أطلس لينكس بكامل حزمه ومميزاته ==='
+              echo '=== 4. تجهيز المرايا لسرعة التحميل القصوى ==='
+              reflector --latest 5 --protocol https --sort rate --save /etc/pacman.d/mirrorlist
+              
+              echo '=== 5. تشغيل السكريبت وبناء الأيزو المكتمل 100% ==='
               bash -x ./atlas-linux-build.sh --mode iso
             "
 
-      - name: 4. رفع ملف الـ ISO النهائي المكتمل إلى جيت هاب
+      - name: 4. رفع ملف الـ ISO النهائي إلى جيت هاب
         uses: actions/upload-artifact@v4
         with:
-          name: Atlas-Linux-Phoenix-Full-ISO
+          name: Atlas-Linux-Phoenix-Ultimate-ISO
           path: |
             *.iso
             atlas-output/*.iso
